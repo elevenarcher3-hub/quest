@@ -118,7 +118,7 @@ body{min-height:100vh}
 .pp-two-col{
   column-count:2;
   column-gap:14px;
-  column-rule:1px solid #ccc;
+  column-rule:1px solid rgba(0,0,0,0.12);
 }
 /* Question block */
 .qblock{
@@ -135,7 +135,7 @@ body{min-height:100vh}
 /* MCQ diagram */
 .mcq-diag{max-width:100%;height:auto;display:block;margin:4px auto 4px 18px;max-height:90px;object-fit:contain}
 /* SQ two-col via CSS columns */
-.sq-two-col{column-count:2;column-gap:14px;column-rule:1px solid #ccc}
+.sq-two-col{column-count:2;column-gap:14px;column-rule:1px solid rgba(0,0,0,0.12)}
 /* CQ stem */
 .cq-stim-box{margin:3px 0 5px 16px;padding:4px 8px;border-left:2.5px solid #888;font-style:italic;font-size:10.5pt;line-height:1.75}
 .cq-stim-img{max-width:100%;height:auto;display:block;margin:4px auto;max-height:100px;object-fit:contain}
@@ -191,14 +191,14 @@ const T = {
   bn: {
     mcqSection:'বহুনির্বাচনি প্রশ্ন',sqSection:'সংক্ষিপ্ত প্রশ্ন',cqSection:'সৃজনশীল প্রশ্ন',
     time:'সময়',marks:'পূর্ণমান',subject:'বিষয়',set:'সেট',received:'প্রাপ্ত নম্বর',
-    stimulus:'উদ্দীপক',foot:'— প্রশ্নপত্র সমাপ্ত —',
+    stimulus:'উদ্দীপক',foot:'— প্রশ্নপত্র সমাপ্ত — শুভকামনা। @mrh.du26',
     opts:{a:'ক',b:'খ',c:'গ',d:'ঘ'},
     markNum:n=>['০','১','২','৩','৪','৫','৬','৭','৮','৯'].reduce((s,d,i)=>s.replace(new RegExp(i,'g'),d),String(n)),
   },
   en: {
     mcqSection:'Multiple Choice Questions',sqSection:'Short Questions',cqSection:'Creative Questions',
     time:'Time',marks:'Total Marks',subject:'Subject',set:'Set',received:'Marks Obtained',
-    stimulus:'Stimulus',foot:'— End of Question Paper —',
+    stimulus:'Stimulus',foot:'— The End. Best of Luck. @mrh.du26',
     opts:{a:'a',b:'b',c:'c',d:'d'},
     markNum:n=>String(n),
   }
@@ -942,7 +942,6 @@ function Preview({forPDF}){
               <div className="qstem">
                 <span className="qstem-num">{num(i+1)}.</span>
                 <span style={{flex:1}}><SmartMText t={txt(q.stem,q.stemEn)}/></span>
-                <span className="qmarks">{num(q.marks||1)}</span>
               </div>
               {q.diagramImg&&<img src={q.diagramImg} alt="figure" className="mcq-diag"/>}
               <div className="mcq-opts">
@@ -985,7 +984,7 @@ function Preview({forPDF}){
         )}
       </>}
 
-      {questions.length>0&&<div className="pp-foot">{isEN?'— End of Question Paper —':tr.foot}</div>}
+      {questions.length>0&&<div className="pp-foot">{tr.foot}</div>}
     </div>
   );
 }
