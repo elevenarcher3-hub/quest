@@ -262,7 +262,7 @@ const defHdr={schoolName:'',examTitle:'',subject:'',subjectCode:'',time:'',total
 const initState={
   header:defHdr,questions:[],
   settings:{
-    
+    apiKey:(typeof localStorage!=='undefined'&&localStorage.getItem('qpb_apikey'))||'',
     mcqStyle:(typeof localStorage!=='undefined'&&localStorage.getItem('qpb_mcq'))||'bangla',
     showAns:false,
     lang:'bn',
@@ -297,10 +297,10 @@ const CLAUDE_URL='https://api.anthropic.com/v1/messages';
 const CLAUDE_MODEL='claude-sonnet-4-6';
 function fileToB64(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(',')[1]);r.onerror=rej;r.readAsDataURL(file);});}
 
-async function claudeCall(messages, maxTokens=4096){
+async function claudeCall(messages, maxTokens=4096, apiKey=''){
   const res=await fetch(CLAUDE_URL,{
     method:'POST',
-    headers:{'Content-Type':'application/json','anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+    headers:{'Content-Type':'application/json','anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true','x-api-key':apiKey},
     body:JSON.stringify({model:CLAUDE_MODEL,max_tokens:maxTokens,messages})
   });
   if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e?.error?.message||'Claude API error '+res.status);}
@@ -316,13 +316,13 @@ MCQ: {"type":"mcq","stem":"...","options":{"a":"...","b":"...","c":"...","d":"..
 CQ:  {"type":"cq","stimulus":"...","subA":"...","subB":"...","subC":"...","subD":"..."}
 SQ:  {"type":"sq","stem":"...","marks":5}
 Rules: preserve Bangla script exactly. Map ক/খ/গ/ঘ options to a/b/c/d. Wrap math in $...$ or $$...$$. Return ONLY a JSON array.`;
-  const txt=await claudeCall([{role:'user',content:[{type:'image',source:{type:'base64',media_type:mime,data:b64}},{type:'text',text:prompt}]}],4096);
+  const txt=await claudeCall([{role:'user',content:[{type:'image',source:{type:'base64',media_type:mime,data:b64}},{type:'text',text:prompt}]}],4096,key);
   try{const arr=JSON.parse(txt);if(!Array.isArray(arr))throw 0;return arr;}
   catch{throw new Error('Claude returned invalid JSON. Try a clearer image.');}
 }
 
 async function geminiTest(key){
-  await claudeCall([{role:'user',content:'Reply: OK'}],10);
+  await claudeCall([{role:'user',content:'Reply: OK'}],10,key);
   return true;
 }
 
@@ -368,7 +368,7 @@ Output: {"stemEn":"..."}
 Additional rules: Translate only Bangla words to natural English.`;
   }
 
-  const txt=await claudeCall([{role:'user',content}],1024);
+  const txt=await claudeCall([{role:'user',content}],1024,key);
   try{return JSON.parse(txt);}
   catch{throw new Error('Translation failed — invalid response. Try again.');}
 }
@@ -418,13 +418,14 @@ function Settings(){
   const[tmsg,setTmsg]=useState('');
   const close=()=>d({t:'SETOPEN',p:false});
   const save=()=>{
-    d({t:'SETTINGS',p:{mcqStyle:s.settings.mcqStyle,showAns:s.settings.showAns}});
-    try{localStorage.setItem('qpb_mcq',s.settings.mcqStyle);}catch(e){}
+    d({t:'SETTINGS',p:{mcqStyle:s.settings.mcqStyle,showAns:s.settings.showAns,apiKey:s.settings.apiKey}});
+    try{localStorage.setItem('qpb_mcq',s.settings.mcqStyle);localStorage.setItem('qpb_apikey',s.settings.apiKey||'');}catch(e){}
     d({t:'NOTIF',p:{type:'success',msg:'Settings saved!'}});close();
   };
   const test=async()=>{
+    if(!s.settings.apiKey){setTres('fail');setTmsg('Enter API key first.');return;}
     setTesting(true);setTres(null);
-    try{await geminiTest();setTres('ok');setTmsg('Claude AI works! ✓');}
+    try{await geminiTest(s.settings.apiKey);setTres('ok');setTmsg('Claude AI works! ✓');}
     catch(e){setTres('fail');setTmsg(e.message);}
     finally{setTesting(false);}
   };
@@ -435,9 +436,13 @@ function Settings(){
         <div className="mbody">
           <div>
             <div style={{fontWeight:600,fontSize:13,marginBottom:8}}>🤖 AI Provider</div>
-            <p style={{fontSize:12,lineHeight:1.6,padding:'8px 11px',background:'#f0fdf4',borderRadius:8,border:'1px solid #bbf7d0',color:'#15803d'}}>
-              ✅ Powered by Claude AI — no API key needed.
-            </p>
+            <div style={{marginBottom:10}}>
+              <label className="lbl">Anthropic API Key</label>
+              <input className="inp" type="password" placeholder="sk-ant-..." value={s.settings.apiKey||''} onChange={e=>d({t:'SETTINGS',p:{apiKey:e.target.value}})}/>
+              <p style={{fontSize:11,color:'#6b7299',marginTop:4}}>Get your key at <a href="https://console.anthropic.com" target="_blank" rel="noreferrer" style={{color:'#4f63f8'}}>console.anthropic.com</a>. Saved locally.</p>
+            </div>
+            <button className="btn btn-secondary btn-sm" onClick={test} disabled={testing}>{testing?<span className="spin">⟳</span>:'🔬'} Test Connection</button>
+            {tres&&<p style={{fontSize:12,marginTop:6,color:tres==='ok'?'#15803d':'#dc2626'}}>{tmsg}</p>}
           </div>
           <div>
             <div style={{fontWeight:600,fontSize:13,marginBottom:10}}>MCQ Option Labels</div>
@@ -642,10 +647,11 @@ function EnglishVersionPanel({q}){
 
   const translate=async(e)=>{
     e.stopPropagation();
-
+    const apiKey=s.settings.apiKey||'';
+    if(!apiKey){d({t:'NOTIF',p:{type:'error',msg:'API key required. Add it in ⚙️ Settings.'}});return;}
     setLoad(true);
     try{
-      const result=await geminiTranslate(q);
+      const result=await geminiTranslate(q,apiKey);
       upd({...result,translatedAt:Date.now()});
       setOpen(true);
       d({t:'NOTIF',p:{type:'success',msg:'Translation done! You can now edit it.'}});
@@ -790,6 +796,7 @@ function ImgUpload(){
   const[err,setErr]=useState('');
   const[dov,setDov]=useState(false);
   const ref=useRef();
+  const apiKey=s.settings.apiKey||'';
 
   const pick=files=>{
     const f=files&&files[0];if(!f)return;
@@ -797,8 +804,9 @@ function ImgUpload(){
   };
 
   const extract=async()=>{
+    if(!apiKey){setErr('API key required. Add it in ⚙️ Settings.');return;}
     setLoad(true);setErr('');
-    try{const qs=await geminiVision(file);setRes(qs);}
+    try{const qs=await geminiVision(file,apiKey);setRes(qs);}
     catch(e){setErr(e.message);}
     finally{setLoad(false);}
   };
