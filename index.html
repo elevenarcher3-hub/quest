@@ -162,21 +162,21 @@ body{min-height:100vh}
   .pp-two-col,.sq-two-col{column-count:1}
 }
 @media print{
-  /* Hide everything by default */
-  body > #root > div > *{display:none!important}
-  /* Show only the preview column's .pp content */
-  body > #root > div > .main{display:block!important;padding:0!important;margin:0!important;max-width:none!important}
-  .editor-col{display:none!important}
-  .preview-col{display:block!important}
-  /* Strip all preview chrome — only .pp renders */
-  .preview-sticky > *{display:none!important}
-  .preview-sticky > .prev-frame{display:block!important;box-shadow:none!important;border:none!important;max-height:none!important;overflow:visible!important;border-radius:0!important;background:transparent!important}
-  /* Also hide toolbar, hint bar, modals, toasts */
-  .toolbar,.math-hint,.moverlay,.notif{display:none!important}
-  /* Clean paper output */
-  .pp{padding:10mm 12mm!important;background:#fff!important}
-  .pp-two-col{column-gap:12px}
-  /* Ensure page margins are clean */
+  /* Hide chrome */
+  .toolbar,.math-hint,.moverlay,.notif,.editor-col{display:none!important}
+  /* Layout reset */
+  .main{display:block!important;padding:0!important;margin:0!important;max-width:none!important}
+  .preview-col{display:block!important;width:100%!important}
+  /* Strip preview frame decoration */
+  .preview-sticky{position:static!important}
+  .preview-sticky > div:first-child{display:none!important}
+  .prev-frame{box-shadow:none!important;border:none!important;border-radius:0!important;max-height:none!important;overflow:visible!important;background:transparent!important}
+  /* Paper */
+  .pp{padding:10mm 12mm!important;background:#fff!important;width:100%!important}
+  /* Force two-column */
+  .pp-two-col{column-count:2!important;column-gap:12px!important;column-rule:1px solid rgba(0,0,0,0.12)!important;column-fill:balance!important;overflow:visible!important;display:block!important}
+  .sq-two-col{column-count:2!important;column-gap:12px!important;column-rule:1px solid rgba(0,0,0,0.12)!important;column-fill:balance!important;overflow:visible!important;display:block!important}
+  .qblock{break-inside:avoid!important;page-break-inside:avoid!important}
   @page{margin:0}
 }
 </style>
