@@ -295,7 +295,7 @@ const Ctx=createContext(null);
 const useApp=()=>useContext(Ctx);
 
 /* ── Gemini Vision ── */
-const GURL='https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+const GURL='https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 function fileToB64(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(',')[1]);r.onerror=rej;r.readAsDataURL(file);});}
 async function geminiVision(file,key){
   if(!key)throw new Error('No API key. Open ⚙ Settings first.');
@@ -792,7 +792,7 @@ function QList(){
   );
 }
 
-/* Image upload — 1-step Gemini vision + Ctrl+V paste support */
+/* Image upload — 1-step Claude vision + Ctrl+V paste support */
 function ImgUpload(){
   const{s,d}=useApp();
   const[file,setFile]=useState(null);
@@ -826,7 +826,7 @@ function ImgUpload(){
     <div className="card" style={{padding:18}}>
       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
         <div className="sec-hdr" style={{margin:0}}>AI Image Extraction</div>
-        <span className="badge badge-mcq" style={{fontSize:10}}>Gemini 2.5 Flash</span>
+        <span className="badge badge-mcq" style={{fontSize:10}}>Gemini 2.0 Flash</span>
       </div>
       <p style={{fontSize:12,color:'#6b7299',marginBottom:14,lineHeight:1.6}}>Upload or paste (Ctrl+V) a photo of a question paper → Gemini auto-extracts all questions.</p>
       {!file?(
@@ -885,7 +885,7 @@ function ImgUpload(){
             {result&&<button className="btn btn-secondary" onClick={()=>{setRes(null);setErr('');}}>↩ Re-extract</button>}
             <button className="btn btn-secondary" onClick={clear}>Clear</button>
           </div>
-          <p style={{fontSize:10,color:'#9ca3af',textAlign:'center'}}>Free tier: 250 images/day · 10 req/min</p>
+          <p style={{fontSize:10,color:'#9ca3af',textAlign:'center'}}>Powered by Gemini 2.0 Flash (gemini-2.0-flash)</p>
         </div>
       )}
     </div>
