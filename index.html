@@ -262,7 +262,7 @@ const defHdr={schoolName:'',examTitle:'',subject:'',subjectCode:'',time:'',total
 const initState={
   header:defHdr,questions:[],
   settings:{
-    geminiApiKey:(typeof localStorage!=='undefined'&&localStorage.getItem('qpb_key'))||'',
+    
     mcqStyle:(typeof localStorage!=='undefined'&&localStorage.getItem('qpb_mcq'))||'bangla',
     showAns:false,
     lang:'bn',
@@ -280,9 +280,7 @@ function reducer(s,a){
     case 'IMPORT':{const qs=a.p.map(q=>({...makeQ(q.type||'sq'),...q,id:uid()}));return{...s,questions:[...s.questions,...qs]};}
     case 'CLEAR':   return{...s,questions:[],header:defHdr};
     case 'SETTINGS':return{...s,settings:{...s.settings,...a.p}};
-    case 'SAVE_KEY':
-      try{localStorage.setItem('qpb_key',a.p);localStorage.setItem('qpb_mcq',s.settings.mcqStyle);}catch(e){}
-      return{...s,settings:{...s.settings,geminiApiKey:a.p}};
+    case 'SAVE_KEY': return s; // deprecated
     case 'NOTIF':   return{...s,ui:{...s.ui,notif:a.p}};
     case 'CLRN':    return{...s,ui:{...s.ui,notif:null}};
     case 'ACTIVE':  return{...s,ui:{...s.ui,activeId:a.p}};
@@ -294,11 +292,23 @@ function reducer(s,a){
 const Ctx=createContext(null);
 const useApp=()=>useContext(Ctx);
 
-/* ── Gemini Vision ── */
-const GURL='https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+/* ── Claude Vision + Translation ── */
+const CLAUDE_URL='https://api.anthropic.com/v1/messages';
+const CLAUDE_MODEL='claude-sonnet-4-6';
 function fileToB64(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(',')[1]);r.onerror=rej;r.readAsDataURL(file);});}
+
+async function claudeCall(messages, maxTokens=4096){
+  const res=await fetch(CLAUDE_URL,{
+    method:'POST',
+    headers:{'Content-Type':'application/json','anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+    body:JSON.stringify({model:CLAUDE_MODEL,max_tokens:maxTokens,messages})
+  });
+  if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e?.error?.message||'Claude API error '+res.status);}
+  const data=await res.json();
+  return(data?.content?.[0]?.text||'').replace(/```json\n?/g,'').replace(/```\n?/g,'').trim();
+}
+
 async function geminiVision(file,key){
-  if(!key)throw new Error('No API key. Open ⚙ Settings first.');
   const b64=await fileToB64(file),mime=file.type||'image/jpeg';
   const prompt=`You are an expert at reading Bangladeshi SSC/HSC exam papers. Extract ALL questions from this image as a JSON array ONLY — no markdown fences, no explanation.
 Schema:
@@ -306,25 +316,18 @@ MCQ: {"type":"mcq","stem":"...","options":{"a":"...","b":"...","c":"...","d":"..
 CQ:  {"type":"cq","stimulus":"...","subA":"...","subB":"...","subC":"...","subD":"..."}
 SQ:  {"type":"sq","stem":"...","marks":5}
 Rules: preserve Bangla script exactly. Map ক/খ/গ/ঘ options to a/b/c/d. Wrap math in $...$ or $$...$$. Return ONLY a JSON array.`;
-  const body={contents:[{parts:[{text:prompt},{inline_data:{mime_type:mime,data:b64}}]}],generationConfig:{temperature:0.1,maxOutputTokens:4096}};
-  const res=await fetch(GURL+'?key='+key,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e?.error?.message||'Gemini error '+res.status);}
-  const data=await res.json();
-  const txt=(data?.candidates?.[0]?.content?.parts?.[0]?.text||'').replace(/```json\n?/g,'').replace(/```\n?/g,'').trim();
+  const txt=await claudeCall([{role:'user',content:[{type:'image',source:{type:'base64',media_type:mime,data:b64}},{type:'text',text:prompt}]}],4096);
   try{const arr=JSON.parse(txt);if(!Array.isArray(arr))throw 0;return arr;}
-  catch{throw new Error('Gemini returned invalid JSON. Try a clearer image.');}
+  catch{throw new Error('Claude returned invalid JSON. Try a clearer image.');}
 }
+
 async function geminiTest(key){
-  const body={contents:[{parts:[{text:'Reply: OK'}]}],generationConfig:{maxOutputTokens:5}};
-  const res=await fetch(GURL+'?key='+key,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e?.error?.message||'Status '+res.status);}
+  await claudeCall([{role:'user',content:'Reply: OK'}],10);
   return true;
 }
 
-/* ── Gemini Translation — Bangla question → English ── */
+/* ── Claude Translation — Bangla question → English ── */
 async function geminiTranslate(q, key){
-  if(!key) throw new Error('No API key. Open ⚙ Settings first.');
-
   const LATEX_RULE=`CRITICAL RULE — LATEX PROTECTION: Identify every mathematical expression wrapped inside single dollar signs ($...$) or double dollar signs ($$...$$). Treat ALL such expressions as strictly READ-ONLY. Do NOT translate them, do NOT modify any characters inside them, do NOT adjust spaces, do NOT remove or alter the dollar sign delimiters, do NOT escape or add backslashes. Copy them byte-for-byte identical to the original. This rule overrides everything else.`;
 
   let content='';
@@ -365,11 +368,7 @@ Output: {"stemEn":"..."}
 Additional rules: Translate only Bangla words to natural English.`;
   }
 
-  const body={contents:[{parts:[{text:content}]}],generationConfig:{temperature:0.1,maxOutputTokens:1024}};
-  const res=await fetch(GURL+'?key='+key,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e?.error?.message||'Gemini error '+res.status);}
-  const data=await res.json();
-  const txt=(data?.candidates?.[0]?.content?.parts?.[0]?.text||'').replace(/```json\n?/g,'').replace(/```\n?/g,'').trim();
+  const txt=await claudeCall([{role:'user',content}],1024);
   try{return JSON.parse(txt);}
   catch{throw new Error('Translation failed — invalid response. Try again.');}
 }
@@ -414,21 +413,18 @@ function Toast(){
 function Settings(){
   const{s,d}=useApp();
   if(!s.ui.settingsOpen)return null;
-  const[key,setKey]=useState(s.settings.geminiApiKey);
-  const[show,setShow]=useState(false);
   const[testing,setTesting]=useState(false);
   const[tres,setTres]=useState(null);
   const[tmsg,setTmsg]=useState('');
   const close=()=>d({t:'SETOPEN',p:false});
   const save=()=>{
-    d({t:'SAVE_KEY',p:key.trim()});
     d({t:'SETTINGS',p:{mcqStyle:s.settings.mcqStyle,showAns:s.settings.showAns}});
     try{localStorage.setItem('qpb_mcq',s.settings.mcqStyle);}catch(e){}
     d({t:'NOTIF',p:{type:'success',msg:'Settings saved!'}});close();
   };
   const test=async()=>{
-    if(!key.trim())return;setTesting(true);setTres(null);
-    try{await geminiTest(key.trim());setTres('ok');setTmsg('API key works! ✓');}
+    setTesting(true);setTres(null);
+    try{await geminiTest();setTres('ok');setTmsg('Claude AI works! ✓');}
     catch(e){setTres('fail');setTmsg(e.message);}
     finally{setTesting(false);}
   };
@@ -438,17 +434,10 @@ function Settings(){
         <div className="mhead"><span style={{fontWeight:700,fontSize:15}}>⚙️ Settings</span><button className="btn btn-ghost btn-sm" onClick={close}>✕</button></div>
         <div className="mbody">
           <div>
-            <div style={{fontWeight:600,fontSize:13,marginBottom:8}}>🔑 Google Gemini API Key</div>
-            <p style={{fontSize:12,color:'#6b7299',marginBottom:10,lineHeight:1.6}}>
-              Needed for AI image extraction. Free key at <a href="https://aistudio.google.com" target="_blank" rel="noreferrer" style={{color:'#4f63f8'}}>aistudio.google.com</a>. Stored only in your browser.
+            <div style={{fontWeight:600,fontSize:13,marginBottom:8}}>🤖 AI Provider</div>
+            <p style={{fontSize:12,lineHeight:1.6,padding:'8px 11px',background:'#f0fdf4',borderRadius:8,border:'1px solid #bbf7d0',color:'#15803d'}}>
+              ✅ Powered by Claude AI — no API key needed.
             </p>
-            <div style={{position:'relative'}}>
-              <input type={show?'text':'password'} className="inp" placeholder="AIzaSy..." value={key}
-                onChange={e=>{setKey(e.target.value);setTres(null);}} style={{paddingRight:40,fontFamily:'monospace',fontSize:12}}/>
-              <button className="btn btn-ghost btn-sm" style={{position:'absolute',right:2,top:'50%',transform:'translateY(-50%)'}} onClick={()=>setShow(v=>!v)}>{show?'🙈':'👁️'}</button>
-            </div>
-            {tres&&<div style={{marginTop:8,padding:'7px 11px',borderRadius:8,fontSize:12,background:tres==='ok'?'#f0fdf4':'#fef2f2',color:tres==='ok'?'#15803d':'#dc2626',border:'1px solid '+(tres==='ok'?'#bbf7d0':'#fecaca')}}>{tmsg}</div>}
-            <button className="btn btn-secondary btn-sm" style={{marginTop:8}} onClick={test} disabled={!key.trim()||testing}>{testing?<span className="spin">⟳</span>:null} Test Key</button>
           </div>
           <div>
             <div style={{fontWeight:600,fontSize:13,marginBottom:10}}>MCQ Option Labels</div>
@@ -653,11 +642,10 @@ function EnglishVersionPanel({q}){
 
   const translate=async(e)=>{
     e.stopPropagation();
-    const key=s.settings.geminiApiKey;
-    if(!key){d({t:'NOTIF',p:{type:'error',msg:'No API key. Open ⚙ Settings first.'}});return;}
+
     setLoad(true);
     try{
-      const result=await geminiTranslate(q,key);
+      const result=await geminiTranslate(q);
       upd({...result,translatedAt:Date.now()});
       setOpen(true);
       d({t:'NOTIF',p:{type:'success',msg:'Translation done! You can now edit it.'}});
@@ -810,7 +798,7 @@ function ImgUpload(){
 
   const extract=async()=>{
     setLoad(true);setErr('');
-    try{const qs=await geminiVision(file,s.settings.geminiApiKey);setRes(qs);}
+    try{const qs=await geminiVision(file);setRes(qs);}
     catch(e){setErr(e.message);}
     finally{setLoad(false);}
   };
@@ -885,7 +873,7 @@ function ImgUpload(){
             {result&&<button className="btn btn-secondary" onClick={()=>{setRes(null);setErr('');}}>↩ Re-extract</button>}
             <button className="btn btn-secondary" onClick={clear}>Clear</button>
           </div>
-          <p style={{fontSize:10,color:'#9ca3af',textAlign:'center'}}>Powered by Gemini 2.0 Flash (gemini-2.0-flash)</p>
+          <p style={{fontSize:10,color:'#9ca3af',textAlign:'center'}}>Powered by Claude AI (claude-sonnet-4-6)</p>
         </div>
       )}
     </div>
