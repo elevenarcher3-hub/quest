@@ -341,7 +341,7 @@ Rules: preserve Bangla script exactly. Map ক/খ/গ/ঘ options to a/b/c/d. W
     return null;
   }
   const arr=extractJSON(txt);
-  if(!arr||!arr.length) throw new Error('Could not extract questions. Try a clearer image or better lighting.');
+  if(!arr||!arr.length) throw new Error('Could not extract questions. Raw response: '+txt.slice(0,300));
   return arr;
 }
 
