@@ -326,8 +326,23 @@ CQ:  {"type":"cq","stimulus":"...","subA":"...","subB":"...","subC":"...","subD"
 SQ:  {"type":"sq","stem":"...","marks":5}
 Rules: preserve Bangla script exactly. Map ক/খ/গ/ঘ options to a/b/c/d. Wrap math in $...$ or $$...$$. Return ONLY a JSON array.`;
   const txt=await claudeCall([{role:'user',content:[{type:'image',source:{type:'base64',media_type:mime,data:b64}},{type:'text',text:prompt}]}],4096,key,VISION_MODEL);
-  try{const arr=JSON.parse(txt);if(!Array.isArray(arr))throw 0;return arr;}
-  catch{throw new Error('Claude returned invalid JSON. Try a clearer image.');}
+  // robust extraction: find first [...] even if model wraps in markdown or prose
+  function extractJSON(s){
+    // strip markdown fences
+    s=s.replace(/```json\n?/gi,'').replace(/```\n?/g,'');
+    // try direct parse
+    try{const a=JSON.parse(s.trim());if(Array.isArray(a))return a;}catch(e){}
+    // find first [ ... ] block
+    const start=s.indexOf('[');
+    const end=s.lastIndexOf(']');
+    if(start!==-1&&end>start){
+      try{const a=JSON.parse(s.slice(start,end+1));if(Array.isArray(a))return a;}catch(e){}
+    }
+    return null;
+  }
+  const arr=extractJSON(txt);
+  if(!arr||!arr.length) throw new Error('Could not extract questions. Try a clearer image or better lighting.');
+  return arr;
 }
 
 async function geminiTest(key){
@@ -378,8 +393,14 @@ Additional rules: Translate only Bangla words to natural English.`;
   }
 
   const txt=await claudeCall([{role:'user',content}],1024,key);
-  try{return JSON.parse(txt);}
-  catch{throw new Error('Translation failed — invalid response. Try again.');}
+  try{
+    const s=txt.replace(/```json\n?/gi,'').replace(/```\n?/g,'').trim();
+    // try direct, then find first {...}
+    try{return JSON.parse(s);}catch(e){}
+    const start=s.indexOf('{');const end=s.lastIndexOf('}');
+    if(start!==-1&&end>start) return JSON.parse(s.slice(start,end+1));
+    throw new Error('no json');
+  }catch{throw new Error('Translation failed. Try again.');}
 }
 
 /* ── PDF Export ── */
