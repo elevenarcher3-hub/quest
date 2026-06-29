@@ -292,30 +292,20 @@ function reducer(s,a){
 const Ctx=createContext(null);
 const useApp=()=>useContext(Ctx);
 
-/* ── Claude Vision + Translation ── */
-const GEMINI_URL='https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
-const GEMINI_TEXT_URL='https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent';
+/* ── Mistral Vision + Translation ── */
+const MISTRAL_URL='https://api.mistral.ai/v1/chat/completions';
+const MISTRAL_VISION_MODEL='pixtral-12b-2409';
+const MISTRAL_TEXT_MODEL='mistral-small-latest';
 function fileToB64(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(',')[1]);r.onerror=rej;r.readAsDataURL(file);});}
 
-async function geminiRaw(url,body,apiKey){
-  const res=await fetch(url+'?key='+apiKey,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e?.error?.message||'Gemini error '+res.status);}
+async function mistralCall(messages, maxTokens=1024, apiKey='', isVision=false){
+  const res=await fetch(MISTRAL_URL,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+apiKey},body:JSON.stringify({model:isVision?MISTRAL_VISION_MODEL:MISTRAL_TEXT_MODEL,messages,max_tokens:maxTokens})});
+  if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e?.message||'Mistral error '+res.status);}
   const data=await res.json();
-  return(data?.candidates?.[0]?.content?.parts?.[0]?.text||'').replace(/```json\n?/gi,'').replace(/```\n?/g,'').trim();
+  return(data?.choices?.[0]?.message?.content||'').replace(/```json\n?/gi,'').replace(/```\n?/g,'').trim();
 }
-async function claudeCall(messages, maxTokens=4096, apiKey='', isVision=false){
-  const url=isVision?GEMINI_URL:GEMINI_TEXT_URL;
-  // convert Anthropic message format → Gemini format
-  const parts=[];
-  for(const m of messages){
-    if(typeof m.content==='string'){parts.push({text:m.content});continue;}
-    for(const p of m.content){
-      if(p.type==='text') parts.push({text:p.text});
-      else if(p.type==='image') parts.push({inline_data:{mime_type:p.source.media_type,data:p.source.data}});
-    }
-  }
-  return geminiRaw(url,{contents:[{parts}],generationConfig:{maxOutputTokens:maxTokens}},apiKey);
-}
+// alias kept so geminiVision/geminiTranslate calls work unchanged
+const claudeCall=(msgs,maxTokens,apiKey,isVision)=>mistralCall(msgs,maxTokens,apiKey,isVision);
 
 async function geminiVision(file,key){
   const b64=await fileToB64(file),mime=file.type||'image/jpeg';
@@ -332,7 +322,7 @@ Rules: preserve Bangla script exactly. Map ক/খ/গ/ঘ options to a/b/c/d. W
     if(start!==-1&&end>start){try{const a=JSON.parse(s.slice(start,end+1));if(Array.isArray(a))return a;}catch(e){}}
     return null;
   }
-  const msgs=[{role:'user',content:[{type:'image',source:{type:'base64',media_type:mime,data:b64}},{type:'text',text:prompt}]}];
+  const msgs=[{role:'user',content:[{type:'image_url',image_url:{url:`data:${mime};base64,${b64}`}},{type:'text',text:prompt}]}];
   let arr=null,lastRaw='';
   try{
     const txt=await claudeCall(msgs,4096,key,true);
@@ -343,7 +333,7 @@ Rules: preserve Bangla script exactly. Map ক/খ/গ/ঘ options to a/b/c/d. W
 }
 
 async function geminiTest(key){
-  await claudeCall([{role:'user',content:'Reply: OK'}],10,key);
+  await mistralCall([{role:'user',content:'Reply: OK'}],10,key,false);
   return true;
 }
 
@@ -464,9 +454,9 @@ function Settings(){
           <div>
             <div style={{fontWeight:600,fontSize:13,marginBottom:8}}>🤖 AI Provider</div>
             <div style={{marginBottom:10}}>
-              <label className="lbl">Gemini API Key (free)</label>
-              <input className="inp" type="password" placeholder="AIza..." value={s.settings.apiKey||''} onChange={e=>d({t:'SETTINGS',p:{apiKey:e.target.value}})}/>
-              <p style={{fontSize:11,color:'#6b7299',marginTop:4}}>Get your key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" style={{color:'#4f63f8'}}>aistudio.google.com/apikey</a>. Saved locally.</p>
+              <label className="lbl">Mistral API Key (free)</label>
+              <input className="inp" type="password" placeholder="..." value={s.settings.apiKey||''} onChange={e=>d({t:'SETTINGS',p:{apiKey:e.target.value}})}/>
+              <p style={{fontSize:11,color:'#6b7299',marginTop:4}}>Get your key at <a href="https://console.mistral.ai/api-keys" target="_blank" rel="noreferrer" style={{color:'#4f63f8'}}>console.mistral.ai</a>. Saved locally.</p>
             </div>
             <button className="btn btn-secondary btn-sm" onClick={test} disabled={testing}>{testing?<span className="spin">⟳</span>:'🔬'} Test Connection</button>
             {tres&&<p style={{fontSize:12,marginTop:6,color:tres==='ok'?'#15803d':'#dc2626'}}>{tmsg}</p>}
