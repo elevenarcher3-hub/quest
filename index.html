@@ -299,7 +299,9 @@ const MISTRAL_TEXT_MODEL='mistral-small-latest';
 function fileToB64(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(',')[1]);r.onerror=rej;r.readAsDataURL(file);});}
 
 async function mistralCall(messages, maxTokens=1024, apiKey='', isVision=false){
-  const res=await fetch(MISTRAL_URL,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+apiKey},body:JSON.stringify({model:isVision?MISTRAL_VISION_MODEL:MISTRAL_TEXT_MODEL,messages,max_tokens:maxTokens})});
+  const body={model:isVision?MISTRAL_VISION_MODEL:MISTRAL_TEXT_MODEL,messages,max_tokens:maxTokens};
+  if(!isVision) body.response_format={type:'json_object'};
+  const res=await fetch(MISTRAL_URL,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+apiKey},body:JSON.stringify(body)});
   if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e?.message||'Mistral error '+res.status);}
   const data=await res.json();
   return(data?.choices?.[0]?.message?.content||'').replace(/```json\n?/gi,'').replace(/```\n?/g,'').trim();
