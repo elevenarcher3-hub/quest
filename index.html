@@ -294,8 +294,8 @@ const useApp=()=>useContext(Ctx);
 
 /* ── Claude Vision + Translation ── */
 const OR_URL='https://openrouter.ai/api/v1/chat/completions';
-const VISION_MODEL='meta-llama/llama-3.2-11b-vision-instruct:free';
-const TEXT_MODEL='google/gemma-3-27b-it:free';
+const VISION_MODEL='openrouter/free';
+const TEXT_MODEL='openrouter/free';
 function fileToB64(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(',')[1]);r.onerror=rej;r.readAsDataURL(file);});}
 
 async function claudeCall(messages, maxTokens=4096, apiKey='', model=TEXT_MODEL){
