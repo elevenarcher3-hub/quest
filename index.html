@@ -205,8 +205,19 @@ const T = {
 
 /* ── Math renderer ── */
 let _n=0; const uid=()=>'q_'+Date.now()+'_'+(++_n);
+/* Normalize all LaTeX delimiter variants to $...$ and $$...$$ */
+function normalizeDelimiters(text){
+  if(!text) return text;
+  // \[...\] → $$...$$  (display)
+  text=text.replace(/\\\[([\s\S]+?)\\\]/g,'$$$$$1$$$$');
+  // \(...\) → $...$  (inline)
+  text=text.replace(/\\\(([\s\S]+?)\\\)/g,'$$$1$$');
+  return text;
+}
 function renderMath(text){
-  if(!text)return'';let out='';
+  if(!text)return'';
+  text=normalizeDelimiters(text);
+  let out='';
   for(const seg of text.split(/(\$\$[\s\S]+?\$\$)/g)){
     if(seg.startsWith('$$')&&seg.endsWith('$$')){
       try{out+=katex.renderToString(seg.slice(2,-2),{displayMode:true,throwOnError:false});}
@@ -309,60 +320,34 @@ const claudeCall=(msgs,maxTokens,apiKey,isVision)=>mistralCall(msgs,maxTokens,ap
 
 async function geminiVision(file,key){
   const b64=await fileToB64(file),mime=file.type||'image/jpeg';
-
-  /* PASS 1: Vision model transcribes image to raw text */
-  const visionPrompt=`You are an expert OCR assistant for Bangladeshi SSC/HSC exam papers (Bangla + English + Math).
-Transcribe EVERY question from this image exactly as written. Include:
-- Full question text preserving Bangla script
-- All answer options with labels (ক/খ/গ/ঘ or a/b/c/d)
-- Mathematical expressions as LaTeX inside $...$ inline or $$...$$ block, single backslash commands e.g. \\frac{a}{b} \\sqrt{x}
-- Stimulus/উদ্দীপক text and sub-questions (ক খ গ ঘ) for creative questions
-Output only the raw transcript text.`;
-
-  const vMsgs=[{role:'user',content:[
-    {type:'image_url',image_url:{url:`data:${mime};base64,${b64}`}},
-    {type:'text',text:visionPrompt}
-  ]}];
-  let rawText='';
-  try{rawText=await claudeCall(vMsgs,4096,key,true);}
-  catch(e){throw new Error('Vision read failed: '+e.message);}
-  if(!rawText||rawText.length<5) throw new Error('No text extracted from image.');
-
-  /* PASS 2: Text model with json_object mode → guaranteed valid JSON */
-  const structPrompt=`Convert this exam transcript into JSON. Return {"questions":[...]} only.
-
-TRANSCRIPT:
-${rawText}
-
-Each question must use ONE of these schemas:
-MCQ (has 4 options ক/খ/গ/ঘ or a/b/c/d): {"type":"mcq","stem":"...","options":{"a":"...","b":"...","c":"...","d":"..."},"marks":1}
-CQ (has উদ্দীপক/stimulus + sub-questions): {"type":"cq","stimulus":"...","subA":"...","subB":"...","subC":"...","subD":"..."}
-SQ (standalone, no options): {"type":"sq","stem":"...","marks":5}
-
-Type detection rules (apply strictly):
-- Exactly 4 labelled options (ক/খ/গ/ঘ or a/b/c/d) present → type:"mcq" (map ক→a খ→b গ→c ঘ→d)
-- Has উদ্দীপক or stimulus block + lettered sub-questions → type:"cq"
-- Anything else → type:"sq"
-
-Preserve Bangla exactly. Keep LaTeX in $...$ or $$...$$ with single backslash commands.`;
-
-  let structured='';
-  try{
-    const body={model:MISTRAL_TEXT_MODEL,messages:[{role:'user',content:structPrompt}],max_tokens:4096,response_format:{type:'json_object'}};
-    const res=await fetch(MISTRAL_URL,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},body:JSON.stringify(body)});
-    if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e?.message||'Mistral error '+res.status);}
-    const data=await res.json();
-    structured=(data?.choices?.[0]?.message?.content||'').trim();
-  }catch(e){throw new Error('Structuring failed: '+e.message);}
-
-  try{
-    const parsed=JSON.parse(structured);
-    const arr=Array.isArray(parsed)?parsed:(Array.isArray(parsed.questions)?parsed.questions:null);
-    if(!arr||!arr.length) throw new Error('Empty question list.');
-    return arr;
-  }catch(e){
-    throw new Error('Parse failed: '+e.message+' | '+structured.slice(0,120));
+  const prompt=`You are an expert at reading Bangladeshi SSC/HSC exam papers. Extract ALL questions from this image as a JSON array ONLY — no markdown fences, no explanation.
+Schema:
+MCQ: {"type":"mcq","stem":"...","options":{"a":"...","b":"...","c":"...","d":"..."},"marks":1}
+CQ:  {"type":"cq","stimulus":"...","subA":"...","subB":"...","subC":"...","subD":"..."}
+SQ:  {"type":"sq","stem":"...","marks":5}
+Rules: preserve Bangla script exactly. Map ক/খ/গ/ঘ options to a/b/c/d. Wrap math in $...$ or $$...$$, escaping every backslash as \\\\ so the JSON stays valid. Return ONLY a JSON array.`;
+  function extractJSON(s){
+    s=s.replace(/```json\n?/gi,'').replace(/```\n?/g,'');
+    const fix=t=>t.replace(/\\(?!["\\/bfnrtu])/g,'\\\\');
+    try{const a=JSON.parse(fix(s.trim()));if(Array.isArray(a))return a;}catch(e){}
+    const start=s.indexOf('['),end=s.lastIndexOf(']');
+    if(start!==-1&&end>start){try{const a=JSON.parse(fix(s.slice(start,end+1)));if(Array.isArray(a))return a;}catch(e){}}
+    return null;
   }
+  const msgs=[{role:'user',content:[{type:'image_url',image_url:{url:`data:${mime};base64,${b64}`}},{type:'text',text:prompt}]}];
+  let arr=null,lastRaw='';
+  try{
+    const txt=await claudeCall(msgs,8192,key,true);
+    lastRaw=txt;arr=extractJSON(txt);
+  }catch(e){lastRaw=e.message;}
+  if(!arr||!arr.length) throw new Error('Extraction failed: '+lastRaw.slice(0,150));
+  // Normalize all delimiter variants in every string field
+  return arr.map(q=>{
+    const norm=s=>typeof s==='string'?normalizeDelimiters(s):s;
+    if(q.type==='mcq') return{...q,stem:norm(q.stem),options:{a:norm(q.options?.a),b:norm(q.options?.b),c:norm(q.options?.c),d:norm(q.options?.d)}};
+    if(q.type==='cq')  return{...q,stimulus:norm(q.stimulus),subA:norm(q.subA),subB:norm(q.subB),subC:norm(q.subC),subD:norm(q.subD)};
+    return{...q,stem:norm(q.stem)};
+  });
 }
 
 async function geminiTest(key){
