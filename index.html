@@ -293,21 +293,16 @@ const useApp=()=>useContext(Ctx);
 /* ── Mistral Vision + Translation ── */
 const MISTRAL_URL='https://api.mistral.ai/v1/chat/completions';
 const MISTRAL_TEXT_MODEL='mistral-small-latest';
-const GEMINI_URL='https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+const GEMINI_URL='https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
 function fileToB64(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(',')[1]);r.onerror=rej;r.readAsDataURL(file);});}
 
-/* Gemini Flash vision call — Pass 1 OCR */
 async function geminiVisionCall(b64,mime,prompt,apiKey){
-  const body={contents:[{parts:[
-    {inline_data:{mime_type:mime,data:b64}},
-    {text:prompt}
-  ]}],generationConfig:{temperature:0.1,maxOutputTokens:4096}};
+  const body={contents:[{parts:[{inline_data:{mime_type:mime,data:b64}},{text:prompt}]}],generationConfig:{temperature:0.1,maxOutputTokens:4096}};
   const res=await fetch(GEMINI_URL+'?key='+apiKey,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e?.error?.message||'Gemini error '+res.status);}
   const data=await res.json();
   return(data?.candidates?.[0]?.content?.parts?.[0]?.text||'').trim();
 }
-
 async function mistralCall(messages, maxTokens=1024, apiKey='', isVision=false){
   const body={model:isVision?MISTRAL_VISION_MODEL:MISTRAL_TEXT_MODEL,messages,max_tokens:maxTokens};
   if(!isVision) body.response_format={type:'json_object'};
@@ -322,42 +317,33 @@ const claudeCall=(msgs,maxTokens,apiKey,isVision)=>mistralCall(msgs,maxTokens,ap
 async function geminiVision(file,key){
   const b64=await fileToB64(file),mime=file.type||'image/jpeg';
 
-  /* PASS 1 — Gemini Flash reads image → raw text transcript */
-  const vPrompt=`You are an expert OCR assistant for Bangladeshi SSC/HSC exam papers written in Bangla and English with mathematics.
-
-TASK: Transcribe every question in this image word-for-word.
-
-RULES:
-1. Preserve every Bangla character exactly as printed. Do not translate.
-2. Question types:
-   - MCQ: question stem + exactly 4 options labelled ক/খ/গ/ঘ
-   - CQ (সৃজনশীল): উদ্দীপক/stimulus paragraph then sub-questions ক/খ/গ/ঘ
-   - SQ: standalone question, no options
-3. For math use LaTeX: $...$ inline, $$...$$ display. Single backslash: \frac{a}{b} \sqrt{x} \alpha \times
-   Example: "If $y + \frac{1}{y} = 5$" not "y + 1/y = 5"
-4. Keep question numbers exactly as shown (১, ২, 3, 4 etc).
-5. Output raw transcript only. No JSON, no commentary.`;
+  /* PASS 1 — Gemini 2.5 Flash: image → raw text transcript */
+  const vPrompt=`You are an expert OCR assistant for Bangladeshi SSC/HSC exam papers (Bangla + English + Math).
+Transcribe EVERY question exactly as printed.
+Rules:
+1. Preserve all Bangla characters exactly. Do not translate.
+2. MCQ = question + 4 options labelled ক/খ/গ/ঘ. CQ = উদ্দীপক/stimulus + sub-questions ক/খ/গ/ঘ. SQ = standalone question.
+3. Math: use LaTeX with $...$ inline and $$...$$ display. Single backslash: \frac{a}{b} \sqrt{x} \alpha \times
+4. Keep question numbers as-is (১ ২ 3 4 etc).
+Output raw transcript only. No JSON.`;
 
   let rawText='';
-  try{
-    rawText=await geminiVisionCall(b64,mime,vPrompt,key);
-  }catch(e){throw new Error('Vision read failed: '+e.message);}
+  try{ rawText=await geminiVisionCall(b64,mime,vPrompt,key); }
+  catch(e){ throw new Error('Vision failed: '+e.message); }
   if(!rawText||rawText.length<5) throw new Error('No text found in image.');
 
   /* PASS 2 — Mistral small + json_object → guaranteed valid JSON */
-  const sPrompt=`Convert this exam transcript into JSON object {"questions":[...]}.
-
+  const sPrompt=`Convert this exam transcript to JSON {"questions":[...]}.
 TRANSCRIPT:
 ${rawText}
 
 SCHEMAS:
-MCQ (4 options ক/খ/গ/ঘ): {"type":"mcq","stem":"...","options":{"a":"...","b":"...","c":"...","d":"..."},"marks":1}
-CQ (stimulus + sub-questions): {"type":"cq","stimulus":"...","subA":"...","subB":"...","subC":"...","subD":"..."}
-SQ (no options): {"type":"sq","stem":"...","marks":5}
-
+MCQ: {"type":"mcq","stem":"...","options":{"a":"...","b":"...","c":"...","d":"..."},"marks":1}
+CQ:  {"type":"cq","stimulus":"...","subA":"...","subB":"...","subC":"...","subD":"..."}
+SQ:  {"type":"sq","stem":"...","marks":5}
 TYPE RULES: 4 labelled options→mcq (ক→a খ→b গ→c ঘ→d). Stimulus+subs→cq. Else→sq.
-MATH: keep $...$ and $$...$$ with single backslash commands. Convert \(...\)→$...$ and \[...\]→$$...$$.
-Preserve Bangla exactly. Return only the JSON object.`;
+MATH: keep $...$ $$...$$ single-backslash LaTeX. Convert \(...\)→$...$ \[...\]→$$...$$.
+Preserve Bangla exactly. Return only JSON.`;
 
   let structured='';
   try{
@@ -366,18 +352,18 @@ Preserve Bangla exactly. Return only the JSON object.`;
     if(!sRes.ok){const e=await sRes.json().catch(()=>({}));throw new Error(e?.message||'Mistral error '+sRes.status);}
     const sData=await sRes.json();
     structured=(sData?.choices?.[0]?.message?.content||'').trim();
-  }catch(e){throw new Error('Structuring failed: '+e.message);}
+  }catch(e){ throw new Error('Structuring failed: '+e.message); }
 
   try{
     const parsed=JSON.parse(structured);
     const arr=Array.isArray(parsed)?parsed:(Array.isArray(parsed.questions)?parsed.questions:null);
     if(!arr||!arr.length) throw new Error('No questions found.');
     return arr;
-  }catch(e){throw new Error('Parse failed: '+e.message+' | '+structured.slice(0,150));}
+  }catch(e){ throw new Error('Parse failed: '+e.message+' | '+structured.slice(0,150)); }
 }
 
 async function geminiTest(key){
-  const res=await fetch(GEMINI_URL+'?key='+key,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:'Reply: OK'}]}],generationConfig:{maxOutputTokens:5}})});
+  const res=await fetch(GEMINI_URL+'?key='+key,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:'Reply OK'}]}],generationConfig:{maxOutputTokens:5}})});
   if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e?.error?.message||'Gemini error '+res.status);}
   return true;
 }
@@ -475,7 +461,7 @@ function Settings(){
             <div style={{marginBottom:10}}>
               <label className="lbl">Gemini API Key (free)</label>
               <input className="inp" type="password" placeholder="..." value={s.settings.apiKey||''} onChange={e=>d({t:'SETTINGS',p:{apiKey:e.target.value}})}/>
-              <p style={{fontSize:11,color:'#6b7299',marginTop:4}}>Get your free key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" style={{color:'#4f63f8'}}>aistudio.google.com</a>. Saved locally.</p>
+              <p style={{fontSize:11,color:'#6b7299',marginTop:4}}>Get your key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" style={{color:'#4f63f8'}}>aistudio.google.com</a>. Saved locally.</p>
             </div>
             <button className="btn btn-secondary btn-sm" onClick={test} disabled={testing}>{testing?<span className="spin">⟳</span>:'🔬'} Test Connection</button>
             {tres&&<p style={{fontSize:12,marginTop:6,color:tres==='ok'?'#15803d':'#dc2626'}}>{tmsg}</p>}
@@ -919,7 +905,7 @@ function ImgUpload(){
             {result&&<button className="btn btn-secondary" onClick={()=>{setRes(null);setErr('');}}>↩ Re-extract</button>}
             <button className="btn btn-secondary" onClick={clear}>Clear</button>
           </div>
-          <p style={{fontSize:10,color:'#9ca3af',textAlign:'center'}}>Powered by Gemini Flash + Mistral</p>
+          <p style={{fontSize:10,color:'#9ca3af',textAlign:'center'}}>Powered by Gemini 2.5 Flash + Mistral</p>
         </div>
       )}
     </div>
