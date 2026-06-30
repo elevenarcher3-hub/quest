@@ -309,59 +309,60 @@ const claudeCall=(msgs,maxTokens,apiKey,isVision)=>mistralCall(msgs,maxTokens,ap
 
 async function geminiVision(file,key){
   const b64=await fileToB64(file),mime=file.type||'image/jpeg';
-  const prompt=`You are an expert at reading Bangladeshi SSC/HSC exam papers. Extract ALL questions from this image as a JSON array ONLY — no markdown fences, no explanation, no text before or after.
-Schema:
-MCQ: {"type":"mcq","stem":"...","options":{"a":"...","b":"...","c":"...","d":"..."},"marks":1}
-CQ:  {"type":"cq","stimulus":"...","subA":"...","subB":"...","subC":"...","subD":"..."}
-SQ:  {"type":"sq","stem":"...","marks":5}
-Rules:
-- Preserve Bangla script exactly.
-- Map ক/খ/গ/ঘ options to a/b/c/d.
-- For math, use LaTeX inside $...$ (inline) or $$...$$ (block). Write LaTeX commands with a single backslash, e.g. \\frac{a}{b}, \\sqrt{x}. The JSON serializer will handle escaping — do NOT write double backslashes.
-- Return ONLY the JSON array starting with [ and ending with ].`;
-  function fixBackslashes(t){
-    // Step 1: temporarily protect already-valid JSON escape sequences
-    // Step 2: escape any remaining lone backslashes (e.g. bare \f \s \p from LaTeX)
-    // We do this by parsing character by character
-    let out='';
-    for(let i=0;i<t.length;i++){
-      if(t[i]==='\\'){
-        const next=t[i+1];
-        // Valid JSON escapes: " \ / b f n r t u
-        if(next==='"'||next==='\\'||next==='/'||next==='b'||next==='f'||next==='n'||next==='r'||next==='t'||next==='u'){
-          out+=t[i]; // keep as-is, it's a valid escape
-        } else {
-          out+='\\\\'; // escape the lone backslash
-        }
-      } else {
-        out+=t[i];
-      }
-    }
-    return out;
-  }
-  function extractJSON(s){
-    s=s.replace(/```json\n?/gi,'').replace(/```\n?/g,'').trim();
-    // Try 1: direct parse
-    try{const a=JSON.parse(s);if(Array.isArray(a))return a;}catch(e){}
-    // Try 2: fix lone backslashes then parse
-    try{const a=JSON.parse(fixBackslashes(s));if(Array.isArray(a))return a;}catch(e){}
-    // Try 3: extract [...] substring, then fix+parse
-    const start=s.indexOf('['),end=s.lastIndexOf(']');
-    if(start!==-1&&end>start){
-      const sub=s.slice(start,end+1);
-      try{const a=JSON.parse(sub);if(Array.isArray(a))return a;}catch(e){}
-      try{const a=JSON.parse(fixBackslashes(sub));if(Array.isArray(a))return a;}catch(e){}
-    }
-    return null;
-  }
-  const msgs=[{role:'user',content:[{type:'image_url',image_url:{url:`data:${mime};base64,${b64}`}},{type:'text',text:prompt}]}];
-  let arr=null,lastRaw='';
+
+  /* PASS 1: Vision model transcribes image to raw text */
+  const visionPrompt=`You are an expert OCR assistant for Bangladeshi SSC/HSC exam papers (Bangla + English + Math).
+Transcribe EVERY question from this image exactly as written. Include:
+- Full question text preserving Bangla script
+- All answer options with labels (ক/খ/গ/ঘ or a/b/c/d)
+- Mathematical expressions as LaTeX inside $...$ inline or $$...$$ block, single backslash commands e.g. \\frac{a}{b} \\sqrt{x}
+- Stimulus/উদ্দীপক text and sub-questions (ক খ গ ঘ) for creative questions
+Output only the raw transcript text.`;
+
+  const vMsgs=[{role:'user',content:[
+    {type:'image_url',image_url:{url:`data:${mime};base64,${b64}`}},
+    {type:'text',text:visionPrompt}
+  ]}];
+  let rawText='';
+  try{rawText=await claudeCall(vMsgs,4096,key,true);}
+  catch(e){throw new Error('Vision read failed: '+e.message);}
+  if(!rawText||rawText.length<5) throw new Error('No text extracted from image.');
+
+  /* PASS 2: Text model with json_object mode → guaranteed valid JSON */
+  const structPrompt=`Convert this exam transcript into JSON. Return {"questions":[...]} only.
+
+TRANSCRIPT:
+${rawText}
+
+Each question must use ONE of these schemas:
+MCQ (has 4 options ক/খ/গ/ঘ or a/b/c/d): {"type":"mcq","stem":"...","options":{"a":"...","b":"...","c":"...","d":"..."},"marks":1}
+CQ (has উদ্দীপক/stimulus + sub-questions): {"type":"cq","stimulus":"...","subA":"...","subB":"...","subC":"...","subD":"..."}
+SQ (standalone, no options): {"type":"sq","stem":"...","marks":5}
+
+Type detection rules (apply strictly):
+- Exactly 4 labelled options (ক/খ/গ/ঘ or a/b/c/d) present → type:"mcq" (map ক→a খ→b গ→c ঘ→d)
+- Has উদ্দীপক or stimulus block + lettered sub-questions → type:"cq"
+- Anything else → type:"sq"
+
+Preserve Bangla exactly. Keep LaTeX in $...$ or $$...$$ with single backslash commands.`;
+
+  let structured='';
   try{
-    const txt=await claudeCall(msgs,8192,key,true);
-    lastRaw=txt;arr=extractJSON(txt);
-  }catch(e){lastRaw=e.message;}
-  if(!arr||!arr.length) throw new Error('Extraction failed: '+lastRaw.slice(0,150));
-  return arr;
+    const body={model:MISTRAL_TEXT_MODEL,messages:[{role:'user',content:structPrompt}],max_tokens:4096,response_format:{type:'json_object'}};
+    const res=await fetch(MISTRAL_URL,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},body:JSON.stringify(body)});
+    if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e?.message||'Mistral error '+res.status);}
+    const data=await res.json();
+    structured=(data?.choices?.[0]?.message?.content||'').trim();
+  }catch(e){throw new Error('Structuring failed: '+e.message);}
+
+  try{
+    const parsed=JSON.parse(structured);
+    const arr=Array.isArray(parsed)?parsed:(Array.isArray(parsed.questions)?parsed.questions:null);
+    if(!arr||!arr.length) throw new Error('Empty question list.');
+    return arr;
+  }catch(e){
+    throw new Error('Parse failed: '+e.message+' | '+structured.slice(0,120));
+  }
 }
 
 async function geminiTest(key){
