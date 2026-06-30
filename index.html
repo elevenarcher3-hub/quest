@@ -309,18 +309,49 @@ const claudeCall=(msgs,maxTokens,apiKey,isVision)=>mistralCall(msgs,maxTokens,ap
 
 async function geminiVision(file,key){
   const b64=await fileToB64(file),mime=file.type||'image/jpeg';
-  const prompt=`You are an expert at reading Bangladeshi SSC/HSC exam papers. Extract ALL questions from this image as a JSON array ONLY — no markdown fences, no explanation.
+  const prompt=`You are an expert at reading Bangladeshi SSC/HSC exam papers. Extract ALL questions from this image as a JSON array ONLY — no markdown fences, no explanation, no text before or after.
 Schema:
 MCQ: {"type":"mcq","stem":"...","options":{"a":"...","b":"...","c":"...","d":"..."},"marks":1}
 CQ:  {"type":"cq","stimulus":"...","subA":"...","subB":"...","subC":"...","subD":"..."}
 SQ:  {"type":"sq","stem":"...","marks":5}
-Rules: preserve Bangla script exactly. Map ক/খ/গ/ঘ options to a/b/c/d. Wrap math in $...$ or $$...$$, escaping every backslash as \\\\ so the JSON stays valid. Return ONLY a JSON array.`;
+Rules:
+- Preserve Bangla script exactly.
+- Map ক/খ/গ/ঘ options to a/b/c/d.
+- For math, use LaTeX inside $...$ (inline) or $$...$$ (block). Write LaTeX commands with a single backslash, e.g. \\frac{a}{b}, \\sqrt{x}. The JSON serializer will handle escaping — do NOT write double backslashes.
+- Return ONLY the JSON array starting with [ and ending with ].`;
+  function fixBackslashes(t){
+    // Step 1: temporarily protect already-valid JSON escape sequences
+    // Step 2: escape any remaining lone backslashes (e.g. bare \f \s \p from LaTeX)
+    // We do this by parsing character by character
+    let out='';
+    for(let i=0;i<t.length;i++){
+      if(t[i]==='\\'){
+        const next=t[i+1];
+        // Valid JSON escapes: " \ / b f n r t u
+        if(next==='"'||next==='\\'||next==='/'||next==='b'||next==='f'||next==='n'||next==='r'||next==='t'||next==='u'){
+          out+=t[i]; // keep as-is, it's a valid escape
+        } else {
+          out+='\\\\'; // escape the lone backslash
+        }
+      } else {
+        out+=t[i];
+      }
+    }
+    return out;
+  }
   function extractJSON(s){
-    s=s.replace(/```json\n?/gi,'').replace(/```\n?/g,'');
-    const fix=t=>t.replace(/\\(?!["\\/bfnrtu])/g,'\\\\');
-    try{const a=JSON.parse(fix(s.trim()));if(Array.isArray(a))return a;}catch(e){}
+    s=s.replace(/```json\n?/gi,'').replace(/```\n?/g,'').trim();
+    // Try 1: direct parse
+    try{const a=JSON.parse(s);if(Array.isArray(a))return a;}catch(e){}
+    // Try 2: fix lone backslashes then parse
+    try{const a=JSON.parse(fixBackslashes(s));if(Array.isArray(a))return a;}catch(e){}
+    // Try 3: extract [...] substring, then fix+parse
     const start=s.indexOf('['),end=s.lastIndexOf(']');
-    if(start!==-1&&end>start){try{const a=JSON.parse(fix(s.slice(start,end+1)));if(Array.isArray(a))return a;}catch(e){}}
+    if(start!==-1&&end>start){
+      const sub=s.slice(start,end+1);
+      try{const a=JSON.parse(sub);if(Array.isArray(a))return a;}catch(e){}
+      try{const a=JSON.parse(fixBackslashes(sub));if(Array.isArray(a))return a;}catch(e){}
+    }
     return null;
   }
   const msgs=[{role:'user',content:[{type:'image_url',image_url:{url:`data:${mime};base64,${b64}`}},{type:'text',text:prompt}]}];
