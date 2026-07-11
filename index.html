@@ -299,17 +299,17 @@ function reducer(s,a){
 const Ctx=createContext(null);
 const useApp=()=>useContext(Ctx);
 
-/* ── AIMLAPI Vision + Translation ── */
-const MISTRAL_URL='https://api.aimlapi.com/v1/chat/completions';
-const MISTRAL_VISION_MODEL='openai/gpt-4o-mini';
-const MISTRAL_TEXT_MODEL='openai/gpt-4o-mini';
+/* ── OpenRouter Vision + Translation ── */
+const MISTRAL_URL='https://openrouter.ai/api/v1/chat/completions';
+const MISTRAL_VISION_MODEL='google/gemini-2.5-flash:free';
+const MISTRAL_TEXT_MODEL='google/gemini-2.5-flash:free';
 function fileToB64(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(',')[1]);r.onerror=rej;r.readAsDataURL(file);});}
 
 async function mistralCall(messages, maxTokens=1024, apiKey='', isVision=false){
   const body={model:isVision?MISTRAL_VISION_MODEL:MISTRAL_TEXT_MODEL,messages,max_tokens:maxTokens};
   if(!isVision) body.response_format={type:'json_object'};
-  const res=await fetch(MISTRAL_URL,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+apiKey},body:JSON.stringify(body)});
-  if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e?.message||'AIMLAPI error '+res.status);}
+  const res=await fetch(MISTRAL_URL,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+apiKey,'HTTP-Referer':location.origin,'X-Title':'Question Paper Builder'},body:JSON.stringify(body)});
+  if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e?.error?.message||e?.message||'OpenRouter error '+res.status);}
   const data=await res.json();
   return(data?.choices?.[0]?.message?.content||'').replace(/```json\n?/gi,'').replace(/```\n?/g,'').trim();
 }
@@ -332,7 +332,7 @@ Output raw transcript only. No JSON, no formatting.`;
       {type:'text',text:vPrompt}
     ]}];
     const vBody={model:MISTRAL_VISION_MODEL,messages:vMsgs,max_tokens:4096};
-    const vRes=await fetch(MISTRAL_URL,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},body:JSON.stringify(vBody)});
+    const vRes=await fetch(MISTRAL_URL,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key,'HTTP-Referer':location.origin,'X-Title':'Question Paper Builder'},body:JSON.stringify(vBody)});
     if(!vRes.ok){const e=await vRes.json().catch(()=>({}));throw new Error(e?.message||'Vision error '+vRes.status);}
     const vData=await vRes.json();
     rawText=(vData?.choices?.[0]?.message?.content||'').trim();
@@ -368,7 +368,7 @@ Preserve all Bangla text exactly. Return only the JSON object, no markdown.`;
   let structured='';
   try{
     const sBody={model:MISTRAL_TEXT_MODEL,messages:[{role:'user',content:sPrompt}],max_tokens:4096,response_format:{type:'json_object'}};
-    const sRes=await fetch(MISTRAL_URL,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},body:JSON.stringify(sBody)});
+    const sRes=await fetch(MISTRAL_URL,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key,'HTTP-Referer':location.origin,'X-Title':'Question Paper Builder'},body:JSON.stringify(sBody)});
     if(!sRes.ok){const e=await sRes.json().catch(()=>({}));throw new Error(e?.message||'Structure error '+sRes.status);}
     const sData=await sRes.json();
     structured=(sData?.choices?.[0]?.message?.content||'').trim();
@@ -472,7 +472,7 @@ function Settings(){
   const test=async()=>{
     if(!s.settings.apiKey){setTres('fail');setTmsg('Enter API key first.');return;}
     setTesting(true);setTres(null);
-    try{await geminiTest(s.settings.apiKey);setTres('ok');setTmsg('AIMLAPI works! ✓');}
+    try{await geminiTest(s.settings.apiKey);setTres('ok');setTmsg('OpenRouter works! ✓');}
     catch(e){setTres('fail');setTmsg(e.message);}
     finally{setTesting(false);}
   };
@@ -484,9 +484,9 @@ function Settings(){
           <div>
             <div style={{fontWeight:600,fontSize:13,marginBottom:8}}>🤖 AI Provider</div>
             <div style={{marginBottom:10}}>
-              <label className="lbl">AIMLAPI Key (free)</label>
+              <label className="lbl">OpenRouter API Key (free)</label>
               <input className="inp" type="password" placeholder="..." value={s.settings.apiKey||''} onChange={e=>d({t:'SETTINGS',p:{apiKey:e.target.value}})}/>
-              <p style={{fontSize:11,color:'#6b7299',marginTop:4}}>Get your key at <a href="https://aimlapi.com/app/keys" target="_blank" rel="noreferrer" style={{color:'#4f63f8'}}>aimlapi.com</a>. Saved locally.</p>
+              <p style={{fontSize:11,color:'#6b7299',marginTop:4}}>Get your key at <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer" style={{color:'#4f63f8'}}>openrouter.ai</a>. Saved locally.</p>
             </div>
             <button className="btn btn-secondary btn-sm" onClick={test} disabled={testing}>{testing?<span className="spin">⟳</span>:'🔬'} Test Connection</button>
             {tres&&<p style={{fontSize:12,marginTop:6,color:tres==='ok'?'#15803d':'#dc2626'}}>{tmsg}</p>}
@@ -871,9 +871,9 @@ function ImgUpload(){
     <div className="card" style={{padding:18}}>
       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
         <div className="sec-hdr" style={{margin:0}}>AI Image Extraction</div>
-        <span className="badge badge-mcq" style={{fontSize:10}}>AIMLAPI GPT-4o mini</span>
+        <span className="badge badge-mcq" style={{fontSize:10}}>OpenRouter Gemini 2.5 Flash</span>
       </div>
-      <p style={{fontSize:12,color:'#6b7299',marginBottom:14,lineHeight:1.6}}>Upload or paste (Ctrl+V) a photo of a question paper → AIMLAPI auto-extracts all questions.</p>
+      <p style={{fontSize:12,color:'#6b7299',marginBottom:14,lineHeight:1.6}}>Upload or paste (Ctrl+V) a photo of a question paper → OpenRouter (free) auto-extracts all questions.</p>
       {!file?(
         <div>
           <div className={'dropzone'+(dov?' dov':'')}
@@ -915,7 +915,7 @@ function ImgUpload(){
           {err&&<div style={{background:'#fef2f2',border:'1px solid #fecaca',borderRadius:8,padding:'8px 12px',fontSize:12,color:'#dc2626',lineHeight:1.6}}>⚠️ {err}</div>}
           {loading&&<div style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',background:'#f0f4ff',border:'1px solid #c7d2fe',borderRadius:8}}>
             <span className="spin" style={{fontSize:18}}>⟳</span>
-            <div><p style={{fontWeight:600,fontSize:12,color:'#3730a3'}}>AIMLAPI analyzing image…</p><p style={{fontSize:11,color:'#6366f1'}}>Reading Bangla text, detecting question types</p></div>
+            <div><p style={{fontWeight:600,fontSize:12,color:'#3730a3'}}>OpenRouter analyzing image…</p><p style={{fontSize:11,color:'#6366f1'}}>Reading Bangla text, detecting question types</p></div>
           </div>}
           {result&&!loading&&<div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:8,padding:'10px 12px',fontSize:12,color:'#15803d'}}>
             <div style={{fontWeight:700,marginBottom:5}}>✅ Found {result.length} question(s)</div>
@@ -925,12 +925,12 @@ function ImgUpload(){
             </ul>
           </div>}
           <div style={{display:'flex',gap:8}}>
-            {!result&&<button className="btn btn-primary" style={{flex:1}} onClick={extract} disabled={loading}>{loading?<><span className="spin">⟳</span> Analyzing…</>:<>✨ Extract with AIMLAPI</>}</button>}
+            {!result&&<button className="btn btn-primary" style={{flex:1}} onClick={extract} disabled={loading}>{loading?<><span className="spin">⟳</span> Analyzing…</>:<>✨ Extract with OpenRouter</>}</button>}
             {result&&<button className="btn btn-primary" style={{flex:1}} onClick={importAll}>✅ Import {result.length} Question{result.length>1?'s':''}</button>}
             {result&&<button className="btn btn-secondary" onClick={()=>{setRes(null);setErr('');}}>↩ Re-extract</button>}
             <button className="btn btn-secondary" onClick={clear}>Clear</button>
           </div>
-          <p style={{fontSize:10,color:'#9ca3af',textAlign:'center'}}>Powered by AIMLAPI (GPT-4o mini)</p>
+          <p style={{fontSize:10,color:'#9ca3af',textAlign:'center'}}>Powered by OpenRouter (Gemini 2.5 Flash, free)</p>
         </div>
       )}
     </div>
