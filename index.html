@@ -301,8 +301,8 @@ const useApp=()=>useContext(Ctx);
 
 /* ── OpenRouter Vision + Translation ── */
 const MISTRAL_URL='https://openrouter.ai/api/v1/chat/completions';
-const MISTRAL_VISION_MODEL='google/gemini-2.5-flash:free';
-const MISTRAL_TEXT_MODEL='google/gemini-2.5-flash:free';
+const MISTRAL_VISION_MODEL='google/gemma-4-31b-it:free';
+const MISTRAL_TEXT_MODEL='google/gemma-4-31b-it:free';
 function fileToB64(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(',')[1]);r.onerror=rej;r.readAsDataURL(file);});}
 
 async function mistralCall(messages, maxTokens=1024, apiKey='', isVision=false){
@@ -871,7 +871,7 @@ function ImgUpload(){
     <div className="card" style={{padding:18}}>
       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
         <div className="sec-hdr" style={{margin:0}}>AI Image Extraction</div>
-        <span className="badge badge-mcq" style={{fontSize:10}}>OpenRouter Gemini 2.5 Flash</span>
+        <span className="badge badge-mcq" style={{fontSize:10}}>OpenRouter Gemma 4</span>
       </div>
       <p style={{fontSize:12,color:'#6b7299',marginBottom:14,lineHeight:1.6}}>Upload or paste (Ctrl+V) a photo of a question paper → OpenRouter (free) auto-extracts all questions.</p>
       {!file?(
@@ -930,7 +930,7 @@ function ImgUpload(){
             {result&&<button className="btn btn-secondary" onClick={()=>{setRes(null);setErr('');}}>↩ Re-extract</button>}
             <button className="btn btn-secondary" onClick={clear}>Clear</button>
           </div>
-          <p style={{fontSize:10,color:'#9ca3af',textAlign:'center'}}>Powered by OpenRouter (Gemini 2.5 Flash, free)</p>
+          <p style={{fontSize:10,color:'#9ca3af',textAlign:'center'}}>Powered by OpenRouter (Gemma 4, free)</p>
         </div>
       )}
     </div>
